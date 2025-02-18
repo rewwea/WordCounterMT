@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <thread>
@@ -9,43 +10,80 @@
 using namespace std;
 using namespace filesystem;
 
-int tconut = 0;
 mutex mtx;
+int totalWords = 0;
+int totalChars = 0;
+int totalLines = 0;
 
-void WordCount(const path& pth)
+void CountStats(const path& pth)
 {
-    ifstream f(pth);
-    int count = 0;
-    string word;
-    while (f >> word)
+    ifstream file(pth);
+    if (!file)
     {
-        count++;
+        cerr << "Failed to open " << pth << endl;
+        return;
     }
-    lock_guard<mutex> lock (mtx);
-    tconut += count;
-    cout << pth << "Words count: " << count << endl;
-}
-
-int main()
-{
-    path pth = current_path();
-    vector <path> files;
-    for (const auto & entry : directory_iterator(pth))
+    
+    int wordCount = 0;
+    int charCount = 0;
+    int lineCount = 0;
+    string line;
+    
+    while(getline(file, line))
     {
-        if (entry.path().extension() == ".txt")
+        lineCount++;
+        charCount += line.size();
+        istringstream iss(line);
+        string word;
+        while(iss >> word)
         {
-            files.push_back(entry.path());
+            wordCount++;
         }
     }
+    
+    lock_guard<mutex> lock(mtx);
+    totalWords += wordCount;
+    totalChars += charCount;
+    totalLines += lineCount;
+    
+    cout << pth << " -> Words: " << wordCount
+         << ", Chars: " << charCount
+         << ", Lines: " << lineCount << endl;
+}
 
-    vector<thread> thrs;
-    for (const auto& fl: files)
-    {
-        thrs.emplace_back(WordCount, fl);
+int main(int argc, char* argv[])
+{
+    path dirPath = (argc > 1) ? argv[1] : current_path();
+    
+    vector<path> files;
+    try {
+        for (const auto & entry : recursive_directory_iterator(dirPath))
+        {
+            if (entry.path().extension() == ".txt")
+            {
+                files.push_back(entry.path());
+            }
+        }
     }
-    for (auto& i : thrs)
+    catch (const exception &e)
     {
-        i.join();
+        cerr << "Error accessing directory: " << e.what() << endl;
+        return 1;
     }
-    cout << "Total words count: " << tconut << endl;
+    
+    vector<thread> threads;
+    for (const auto& file : files)
+    {
+        threads.emplace_back(CountStats, file);
+    }
+    for (auto& t : threads)
+    {
+        t.join();
+    }
+    
+    cout << "Total -> Words: " << totalWords
+         << ", Chars: " << totalChars
+         << ", Lines: " << totalLines << endl;
+    
+    return 0;
 }
